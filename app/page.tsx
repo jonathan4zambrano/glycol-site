@@ -309,7 +309,7 @@ function CTA() {
         <div className="relative mt-8 flex justify-center">
           <Link
             href="/contact"
-            className="rounded-full bg-blue-600 px-14 py-4 text-base font-semibold text-white hover:bg-blue-500 transition-colors shadow-lg shadow-blue-900/40"
+            className="rounded-full bg-blue-600 px-28 py-4 text-base font-semibold text-white hover:bg-blue-500 transition-colors shadow-lg shadow-blue-900/40"
           >
             Contact Us
           </Link>
