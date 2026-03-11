@@ -306,18 +306,12 @@ function CTA() {
         <p className="relative mt-4 max-w-xl mx-auto text-zinc-400 text-lg">
           Tell us your site and expected glycol ranges. We'll follow up with a simple pilot plan.
         </p>
-        <div className="relative mt-8 flex flex-wrap justify-center gap-4">
+        <div className="relative mt-8 flex justify-center">
           <Link
             href="/contact"
-            className="rounded-full bg-blue-600 px-8 py-3 text-sm font-semibold text-white hover:bg-blue-500 transition-colors shadow-lg shadow-blue-900/40"
+            className="rounded-full bg-blue-600 px-14 py-4 text-base font-semibold text-white hover:bg-blue-500 transition-colors shadow-lg shadow-blue-900/40"
           >
             Contact Us
-          </Link>
-          <Link
-            href="/login"
-            className="rounded-full border border-[#0f2540] px-8 py-3 text-sm font-semibold text-zinc-300 hover:border-blue-700 hover:text-white transition-colors"
-          >
-            View Dashboard
           </Link>
         </div>
       </div>
