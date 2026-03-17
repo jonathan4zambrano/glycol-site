@@ -16,16 +16,24 @@ export async function POST(req: Request) {
     },
   });
 
-  await transporter.sendMail({
-    from: `"GlycoTech Contact" <${process.env.GMAIL_USER}>`,
-    to: "jonathan4zambrano@gmail.com",
-    subject: `New message from ${name}`,
-    html: `
-      <p><strong>Name:</strong> ${name}</p>
-      <p><strong>Email:</strong> ${email}</p>
-      <p><strong>Message:</strong><br/>${message}</p>
-    `,
-  });
+  try {
+    await transporter.sendMail({
+      from: `"GlycoTech Contact" <${process.env.GMAIL_USER}>`,
+      to: "jonathan4zambrano@gmail.com",
+      subject: `New message from ${name}`,
+      html: `
+        <p><strong>Name:</strong> ${name}</p>
+        <p><strong>Email:</strong> ${email}</p>
+        <p><strong>Message:</strong><br/>${message}</p>
+      `,
+    });
 
-  return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error("Email send failed:", err);
+    return NextResponse.json(
+      { error: "Failed to send message. Please try again later." },
+      { status: 500 }
+    );
+  }
 }
