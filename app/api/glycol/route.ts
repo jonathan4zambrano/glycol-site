@@ -12,37 +12,9 @@ const DEVICE_ID = "50303856-3435-4265-8041-1f0b8677e06f";
 const NRF_CLOUD_BASE = "https://api.nrfcloud.com/v1";
 
 /* ------------------------------------------------------------------
- * Calibration curve (averaged from two measurement sets).
- * Maps Pico sensor current (µA) → glycol concentration (ppm).
- * Table is sorted descending by µA (higher current = lower concentration).
+ * NOTE: Calibration is done on the Pico Pi (estimate_concentration).
+ * The value arriving from nRF Cloud is already in PPM — no conversion needed.
  * ------------------------------------------------------------------ */
-const CALIBRATION_TABLE = [
-  { uA: 41.48, ppm: 0 },
-  { uA: 36.56, ppm: 50 },
-  { uA: 25.95, ppm: 100 },
-  { uA: 18.50, ppm: 150 },
-  { uA: 11.21, ppm: 200 },
-  { uA: 5.70, ppm: 250 },
-];
-
-/**
- * Convert raw sensor current (µA) to concentration (ppm) using
- * linear interpolation on the averaged calibration table.
- */
-function uaToPpm(uA: number): number {
-  if (uA >= CALIBRATION_TABLE[0].uA) return 0;
-  if (uA <= CALIBRATION_TABLE[CALIBRATION_TABLE.length - 1].uA) return 260;
-
-  for (let i = 0; i < CALIBRATION_TABLE.length - 1; i++) {
-    const high = CALIBRATION_TABLE[i];
-    const low = CALIBRATION_TABLE[i + 1];
-    if (uA <= high.uA && uA >= low.uA) {
-      const ratio = (high.uA - uA) / (high.uA - low.uA);
-      return Math.round(high.ppm + ratio * (low.ppm - high.ppm));
-    }
-  }
-  return 0;
-}
 
 /* ------------------------------------------------------------------
  * In-memory store for readings POSTed by the bridge script.
@@ -160,7 +132,7 @@ export async function GET() {
           item.message?.data?.concentration_pct != null
       )
       .map((item) => ({
-        concentration_pct: uaToPpm(item.message.data.concentration_pct),
+        concentration_pct: item.message.data.concentration_pct,
         timestamp: item.message.ts
           ? new Date(item.message.ts).toISOString()
           : item.receivedAt,
