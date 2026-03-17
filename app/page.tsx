@@ -78,7 +78,7 @@ function Hero() {
 
 function Stats() {
   const items = [
-    { value: "< 2 min", label: "Alert response time" },
+    { value: "< 5 min", label: "Alert response time" },
     { value: "24 / 7", label: "Continuous monitoring" },
     { value: "± 5 ppm", label: "Sensor accuracy" },
     { value: "3 sites", label: "Pilot deployments" },
@@ -102,7 +102,19 @@ function Stats() {
 
 function Story() {
   return (
-    <section className="mx-auto max-w-6xl px-6 py-28">
+    <section className="relative py-28 overflow-hidden">
+      {/* Background image */}
+      <div className="absolute inset-0">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/Deicing_Background.jpeg"
+          alt="Aircraft de-icing at night"
+          className="absolute inset-0 w-full h-full object-cover"
+        />
+        <div className="absolute inset-0 bg-[#050d1a]/80" />
+      </div>
+
+      <div className="relative mx-auto max-w-6xl px-6">
       <div className="grid gap-16 md:grid-cols-2 items-center">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.25em] text-blue-400 mb-4">
@@ -134,7 +146,7 @@ function Story() {
               "Matthias Bernhard",
               "Marcus Tunkl",
             ].map((name) => (
-              <li key={name} className="flex items-center gap-3 text-sm text-zinc-300">
+              <li key={name} className="flex items-center gap-3 text-base text-zinc-300">
                 <span className="h-7 w-7 rounded-full bg-blue-700/30 border border-blue-600/30 flex items-center justify-center text-xs font-bold text-blue-300">
                   {name[0]}
                 </span>
@@ -146,6 +158,7 @@ function Story() {
             Consultant: Vasili Karanassios · University of Waterloo
           </div>
         </div>
+      </div>
       </div>
     </section>
   );
@@ -271,8 +284,8 @@ function Vision() {
         <div className="grid grid-cols-2 gap-4">
           {[
             { metric: "99%", label: "Uptime target", color: "text-blue-400" },
-            { metric: "< 5s", label: "Data latency", color: "text-teal-400" },
-            { metric: "Zero", label: "Reagents needed", color: "text-blue-400" },
+            { metric: "< 30s", label: "Data latency", color: "text-teal-400" },
+            { metric: "-25°C", label: "Temperature rated", color: "text-blue-400" },
             { metric: "100×", label: "Faster than manual", color: "text-teal-400" },
           ].map((item) => (
             <div key={item.label} className="rounded-2xl border border-[#0f2540] bg-[#0a1628] p-6">
