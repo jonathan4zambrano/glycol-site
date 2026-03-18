@@ -1,31 +1,25 @@
 import { NextResponse } from "next/server";
+import { Redis } from "@upstash/redis";
 import type {
   GlycolReading,
-  NrfCloudMessagesResponse,
   GlycolApiResponse,
 } from "@/app/types/glycol";
 
-// nRF9160 DK device ID (reads glycol data from Pico Pi via UART1)
-// Previously this was the Thingy:91 X UUID. Updated to the DK's
-// internal modem UUID after provisioning.
-const DEVICE_ID = "50303856-3435-4265-8041-1f0b8677e06f";
-const NRF_CLOUD_BASE = "https://api.nrfcloud.com/v1";
-
 /* ------------------------------------------------------------------
- * NOTE: Calibration is done on the Pico Pi (estimate_concentration).
- * The value arriving from nRF Cloud is already in PPM — no conversion needed.
+ * Upstash Redis — persistent store for simulator readings.
+ * Works both locally and on Vercel (serverless).
  * ------------------------------------------------------------------ */
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL!,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+});
 
-/* ------------------------------------------------------------------
- * In-memory store for readings POSTed by the bridge script.
- * Keeps the last 200 readings. Resets when the server restarts.
- * ------------------------------------------------------------------ */
+const REDIS_KEY = "glycol:readings";
 const MAX_STORED_READINGS = 200;
-const bridgeReadings: GlycolReading[] = [];
 
 /* ------------------------------------------------------------------
  * POST  /api/glycol
- * Called by the Python bridge script with:
+ * Called by the simulator with:
  *   { "concentration_pct": 42.8, "timestamp": "2026-03-15T..." }
  * ------------------------------------------------------------------ */
 export async function POST(request: Request) {
@@ -56,13 +50,11 @@ export async function POST(request: Request) {
       receivedAt: now,
     };
 
-    // Add to front of array (newest first)
-    bridgeReadings.unshift(reading);
+    // Push to front of Redis list (newest first)
+    await redis.lpush(REDIS_KEY, JSON.stringify(reading));
 
     // Trim to max size
-    if (bridgeReadings.length > MAX_STORED_READINGS) {
-      bridgeReadings.length = MAX_STORED_READINGS;
-    }
+    await redis.ltrim(REDIS_KEY, 0, MAX_STORED_READINGS - 1);
 
     return NextResponse.json({ ok: true, reading });
   } catch {
@@ -75,68 +67,32 @@ export async function POST(request: Request) {
 
 /* ------------------------------------------------------------------
  * GET  /api/glycol
- * Merges bridge readings (simulator) + nRF Cloud readings (real sensor)
- * into a single sorted history. The dashboard polls this every 15 s.
+ * Returns simulator readings from Redis.
+ * The dashboard polls this every 15 seconds.
  * ------------------------------------------------------------------ */
 export async function GET() {
-  let cloudReadings: GlycolReading[] = [];
+  try {
+    const raw = await redis.lrange(REDIS_KEY, 0, MAX_STORED_READINGS - 1);
 
-  // Always try to fetch from nRF Cloud
-  const apiKey = process.env.NRF_CLOUD_API_KEY;
+    const readings: GlycolReading[] = raw.map((item) => {
+      if (typeof item === "string") return JSON.parse(item);
+      return item as GlycolReading;
+    });
 
-  if (apiKey && apiKey !== "your-api-key-here") {
-    try {
-      const url = new URL(`${NRF_CLOUD_BASE}/messages`);
-      url.searchParams.set("deviceId", DEVICE_ID);
-      url.searchParams.set("appId", "GLYCOL");
-      url.searchParams.set("pageLimit", "100");
+    const latest = readings[0] ?? null;
+    const deviceOnline = latest
+      ? Date.now() - new Date(latest.timestamp).getTime() < 60 * 60 * 1000
+      : false;
 
-      const res = await fetch(url.toString(), {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          Accept: "application/json",
-        },
-        cache: "no-store",
-      });
-
-      if (res.ok) {
-        const data: NrfCloudMessagesResponse = await res.json();
-
-        cloudReadings = (data.items ?? [])
-          .filter(
-            (item) =>
-              item.message?.appId === "GLYCOL" &&
-              item.message?.data?.concentration_pct != null
-          )
-          .map((item) => ({
-            concentration_pct: item.message.data.concentration_pct,
-            timestamp: item.message.ts
-              ? new Date(item.message.ts).toISOString()
-              : item.receivedAt,
-            receivedAt: item.receivedAt,
-          }));
-      }
-    } catch {
-      // nRF Cloud fetch failed; continue with bridge data only
-    }
+    return NextResponse.json<GlycolApiResponse>({
+      latest,
+      history: readings,
+      deviceOnline,
+    });
+  } catch (err) {
+    return NextResponse.json<GlycolApiResponse>(
+      { latest: null, history: [], deviceOnline: false, error: `Redis error: ${err}` },
+      { status: 500 }
+    );
   }
-
-  // Merge bridge + cloud readings, sort newest first, deduplicate by timestamp
-  const allReadings = [...bridgeReadings, ...cloudReadings]
-    .sort(
-      (a, b) =>
-        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    )
-    .slice(0, 200);
-
-  const latest = allReadings[0] ?? null;
-  const deviceOnline = latest
-    ? Date.now() - new Date(latest.timestamp).getTime() < 60 * 60 * 1000
-    : false;
-
-  return NextResponse.json<GlycolApiResponse>({
-    latest,
-    history: allReadings,
-    deviceOnline,
-  });
 }
