@@ -54,15 +54,73 @@ function formatTimeAgo(date: Date, currentTime: number): string {
 }
 
 function buildDailyChartData(history: GlycolReading[]) {
-  const chronological = [...history].reverse().slice(-24);
-  return chronological.map((r) => ({
-    time: new Date(r.timestamp).toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }),
-    HDF10: r.concentration_pct,
-  }));
+  if (history.length === 0) return [];
+
+  const now = new Date();
+  const twentyFourMinAgo = new Date(now.getTime() - 24 * 60 * 1000);
+
+  // Build a map of minute → last ppm value from all history
+  const minuteMap = new Map<number, number>(); // key = minute timestamp (floored)
+  for (const r of history) {
+    const d = new Date(r.timestamp);
+    const minTs = new Date(d).setSeconds(0, 0);
+    minuteMap.set(minTs, Math.round(r.concentration_pct * 10) / 10);
+  }
+
+  // Find the most recent reading at or before the 24-min window to seed the carry-forward value
+  const sorted = [...history].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
+  let lastVal = 0;
+  for (const r of sorted) {
+    if (new Date(r.timestamp).getTime() <= twentyFourMinAgo.getTime()) {
+      lastVal = Math.round(r.concentration_pct * 10) / 10;
+    }
+  }
+
+  // Fill every minute for the last 24 minutes
+  const points: { time: string; HDF10: number }[] = [];
+  const cursor = new Date(twentyFourMinAgo);
+  cursor.setSeconds(0, 0);
+  const endMin = new Date(now);
+  endMin.setSeconds(0, 0);
+
+  while (cursor <= endMin) {
+    const ts = cursor.getTime();
+    if (minuteMap.has(ts)) {
+      lastVal = minuteMap.get(ts)!;
+    }
+    const key = `${cursor.getHours().toString().padStart(2, "0")}:${cursor.getMinutes().toString().padStart(2, "0")}`;
+    points.push({ time: key, HDF10: lastVal });
+    cursor.setMinutes(cursor.getMinutes() + 1);
+  }
+
+  return points;
+}
+
+// ── Icon components ─────────────────────────────────────────
+function IconSites() {
+  return (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498 4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 0 0-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0Z" />
+    </svg>
+  );
+}
+
+function IconAlert() {
+  return (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+    </svg>
+  );
+}
+
+function IconClock() {
+  return (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+    </svg>
+  );
 }
 
 export default function DashboardPage() {
@@ -70,8 +128,22 @@ export default function DashboardPage() {
   const [now, setNow] = useState(Date.now());
   const { data: glycolData, loading, error } = useGlycolData();
 
-  const [lastChangedAt, setLastChangedAt] = useState<number | null>(null);
+  const [lastChangedAt, setLastChangedAt] = useState<number | null>(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("hdf10_lastChangedAt");
+      return stored ? Number(stored) : null;
+    }
+    return null;
+  });
   const prevConcentration = useRef<number | null>(null);
+
+  // Hydrate the ref from localStorage on mount
+  useEffect(() => {
+    const stored = localStorage.getItem("hdf10_lastConcentration");
+    if (stored !== null) {
+      prevConcentration.current = Number(stored);
+    }
+  }, []);
 
   // Tick every second so the timer counts up smoothly
   useEffect(() => {
@@ -87,7 +159,10 @@ export default function DashboardPage() {
     const currentVal = liveReading.concentration_pct;
     if (prevConcentration.current === null || currentVal !== prevConcentration.current) {
       prevConcentration.current = currentVal;
-      setLastChangedAt(Date.now());
+      const now = Date.now();
+      setLastChangedAt(now);
+      localStorage.setItem("hdf10_lastChangedAt", String(now));
+      localStorage.setItem("hdf10_lastConcentration", String(currentVal));
     }
   }, [liveReading]);
 
@@ -101,7 +176,7 @@ export default function DashboardPage() {
       isLive: true,
       data: {
         temperature: "—",
-        concentration: liveReading ? liveReading.concentration_pct : 0,
+        concentration: liveReading ? Math.round(liveReading.concentration_pct * 10) / 10 : 0,
         status: !liveReading || !glycolData?.deviceOnline
           ? "Offline"
           : liveReading.concentration_pct > THRESHOLD
@@ -153,8 +228,8 @@ export default function DashboardPage() {
     {
       id: 5,
       label: "Station H4",
-      x: 21,
-      y: 48,
+      x: 16,
+      y: 49,
       data: {
         temperature: "3.8°C",
         concentration: 45,
@@ -182,7 +257,7 @@ export default function DashboardPage() {
       : null;
 
   const alertCount =
-    (liveReading && liveReading.concentration_pct > THRESHOLD ? 1 : 0) + 1; // +1 for mock F1
+    liveReading && liveReading.concentration_pct > THRESHOLD ? 1 : 0;
 
   // ── Loading state ───────────────────────────────────────────
   if (loading) {
@@ -228,21 +303,48 @@ export default function DashboardPage() {
 
         {/* Stat cards */}
         <div className="mt-10 grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-[#0a1628] rounded-2xl border border-[#0f2540] px-6 py-6">
-            <p className="text-xs font-semibold tracking-widest text-zinc-500 uppercase mb-2">Active Sites</p>
+          {/* Active Sites */}
+          <div className="relative overflow-hidden bg-gradient-to-br from-[#0a1628] to-[#0d1f3c] rounded-2xl border border-[#0f2540] px-6 py-6">
+            <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-full -translate-y-8 translate-x-8" />
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-blue-400"><IconSites /></span>
+              <p className="text-xs font-semibold tracking-widest text-zinc-500 uppercase">Active Sites</p>
+            </div>
             <p className="text-4xl font-bold text-white">
-              {glycolData?.deviceOnline ? 1 : 0} / 6
+              {glycolData?.deviceOnline ? 1 : 0}
+              <span className="text-lg font-medium text-zinc-500 ml-1">/ 6</span>
+            </p>
+            <div className="mt-3 flex gap-1">
+              {[1,2,3,4,5,6].map((i) => (
+                <div key={i} className={`h-1.5 flex-1 rounded-full ${i === 1 && glycolData?.deviceOnline ? "bg-blue-400" : "bg-[#0f2540]"}`} />
+              ))}
+            </div>
+          </div>
+
+          {/* Alerts */}
+          <div className="relative overflow-hidden bg-gradient-to-br from-[#0a1628] to-[#0d1f3c] rounded-2xl border border-[#0f2540] px-6 py-6">
+            <div className="absolute top-0 right-0 w-24 h-24 bg-yellow-500/5 rounded-full -translate-y-8 translate-x-8" />
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-yellow-400"><IconAlert /></span>
+              <p className="text-xs font-semibold tracking-widest text-zinc-500 uppercase">Alerts</p>
+            </div>
+            <p className="text-4xl font-bold text-yellow-400">{alertCount}</p>
+            <p className="text-xs text-zinc-600 mt-3">
+              {alertCount > 0 ? `${alertCount} station${alertCount > 1 ? "s" : ""} above ${THRESHOLD} ppm` : "All stations normal"}
             </p>
           </div>
-          <div className="bg-[#0a1628] rounded-2xl border border-[#0f2540] px-6 py-6">
-            <p className="text-xs font-semibold tracking-widest text-zinc-500 uppercase mb-2">Alerts</p>
-            <p className="text-4xl font-bold text-yellow-400">{alertCount}</p>
-          </div>
-          <div className="bg-[#0a1628] rounded-2xl border border-[#0f2540] px-6 py-6">
-            <p className="text-xs font-semibold tracking-widest text-zinc-500 uppercase mb-2">Last Reading</p>
+
+          {/* Last Reading */}
+          <div className="relative overflow-hidden bg-gradient-to-br from-[#0a1628] to-[#0d1f3c] rounded-2xl border border-[#0f2540] px-6 py-6">
+            <div className="absolute top-0 right-0 w-24 h-24 bg-zinc-500/5 rounded-full -translate-y-8 translate-x-8" />
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-zinc-400"><IconClock /></span>
+              <p className="text-xs font-semibold tracking-widest text-zinc-500 uppercase">Last Reading</p>
+            </div>
             <p className="text-4xl font-bold text-white">
               {lastChangedAt ? formatTimeAgo(new Date(lastChangedAt), now) : "—"}
             </p>
+            <p className="text-xs text-zinc-600 mt-3">Station HDF-10</p>
           </div>
         </div>
 
@@ -371,7 +473,7 @@ export default function DashboardPage() {
                           <span>Concentration</span>
                           <span className="text-white font-medium">
                             {spot.isLive && liveReading
-                              ? `${liveReading.concentration_pct} ppm`
+                              ? `${(Math.round(liveReading.concentration_pct * 10) / 10).toFixed(1)} ppm`
                               : `${spot.data.concentration} ppm`}
                           </span>
                         </div>

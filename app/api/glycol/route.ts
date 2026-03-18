@@ -75,88 +75,68 @@ export async function POST(request: Request) {
 
 /* ------------------------------------------------------------------
  * GET  /api/glycol
- * Returns readings from bridge (primary) or nRF Cloud (fallback).
- * The dashboard polls this every 15 seconds.
+ * Merges bridge readings (simulator) + nRF Cloud readings (real sensor)
+ * into a single sorted history. The dashboard polls this every 15 s.
  * ------------------------------------------------------------------ */
 export async function GET() {
-  // If we have bridge readings, use those (preferred path)
-  if (bridgeReadings.length > 0) {
-    const latest = bridgeReadings[0];
-    const deviceOnline =
-      Date.now() - new Date(latest.timestamp).getTime() < 5 * 60 * 1000;
+  let cloudReadings: GlycolReading[] = [];
 
-    return NextResponse.json<GlycolApiResponse>({
-      latest,
-      history: bridgeReadings.slice(0, 100),
-      deviceOnline,
-    });
-  }
-
-  // Fallback: fetch from nRF Cloud (original path)
+  // Always try to fetch from nRF Cloud
   const apiKey = process.env.NRF_CLOUD_API_KEY;
 
-  if (!apiKey || apiKey === "your-api-key-here") {
-    return NextResponse.json<GlycolApiResponse>(
-      { latest: null, history: [], deviceOnline: false, error: "No data available" },
-      { status: 200 }
-    );
-  }
+  if (apiKey && apiKey !== "your-api-key-here") {
+    try {
+      const url = new URL(`${NRF_CLOUD_BASE}/messages`);
+      url.searchParams.set("deviceId", DEVICE_ID);
+      url.searchParams.set("appId", "GLYCOL");
+      url.searchParams.set("pageLimit", "100");
 
-  try {
-    const url = new URL(`${NRF_CLOUD_BASE}/messages`);
-    url.searchParams.set("deviceId", DEVICE_ID);
-    url.searchParams.set("appId", "GLYCOL");
-    url.searchParams.set("pageLimit", "100");
+      const res = await fetch(url.toString(), {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          Accept: "application/json",
+        },
+        cache: "no-store",
+      });
 
-    const res = await fetch(url.toString(), {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "application/json",
-      },
-      next: { revalidate: 15 },
-    });
+      if (res.ok) {
+        const data: NrfCloudMessagesResponse = await res.json();
 
-    if (!res.ok) {
-      return NextResponse.json<GlycolApiResponse>(
-        { latest: null, history: [], deviceOnline: false, error: `nRF Cloud error: ${res.status}` },
-        { status: 502 }
-      );
+        cloudReadings = (data.items ?? [])
+          .filter(
+            (item) =>
+              item.message?.appId === "GLYCOL" &&
+              item.message?.data?.concentration_pct != null
+          )
+          .map((item) => ({
+            concentration_pct: item.message.data.concentration_pct,
+            timestamp: item.message.ts
+              ? new Date(item.message.ts).toISOString()
+              : item.receivedAt,
+            receivedAt: item.receivedAt,
+          }));
+      }
+    } catch {
+      // nRF Cloud fetch failed; continue with bridge data only
     }
-
-    const data: NrfCloudMessagesResponse = await res.json();
-
-    const readings: GlycolReading[] = (data.items ?? [])
-      .filter(
-        (item) =>
-          item.message?.appId === "GLYCOL" &&
-          item.message?.data?.concentration_pct != null
-      )
-      .map((item) => ({
-        concentration_pct: item.message.data.concentration_pct,
-        timestamp: item.message.ts
-          ? new Date(item.message.ts).toISOString()
-          : item.receivedAt,
-        receivedAt: item.receivedAt,
-      }))
-      .sort(
-        (a, b) =>
-          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-      );
-
-    const latest = readings[0] ?? null;
-    const deviceOnline = latest
-      ? Date.now() - new Date(latest.timestamp).getTime() < 5 * 60 * 1000
-      : false;
-
-    return NextResponse.json<GlycolApiResponse>({
-      latest,
-      history: readings,
-      deviceOnline,
-    });
-  } catch {
-    return NextResponse.json<GlycolApiResponse>(
-      { latest: null, history: [], deviceOnline: false, error: "Failed to fetch data" },
-      { status: 500 }
-    );
   }
+
+  // Merge bridge + cloud readings, sort newest first, deduplicate by timestamp
+  const allReadings = [...bridgeReadings, ...cloudReadings]
+    .sort(
+      (a, b) =>
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    )
+    .slice(0, 200);
+
+  const latest = allReadings[0] ?? null;
+  const deviceOnline = latest
+    ? Date.now() - new Date(latest.timestamp).getTime() < 60 * 60 * 1000
+    : false;
+
+  return NextResponse.json<GlycolApiResponse>({
+    latest,
+    history: allReadings,
+    deviceOnline,
+  });
 }
