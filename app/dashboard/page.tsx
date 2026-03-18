@@ -325,10 +325,10 @@ export default function DashboardPage() {
           <div className="relative overflow-hidden bg-gradient-to-br from-[#0a1628] to-[#0d1f3c] rounded-2xl border border-[#0f2540] px-6 py-6">
             <div className="absolute top-0 right-0 w-24 h-24 bg-yellow-500/5 rounded-full -translate-y-8 translate-x-8" />
             <div className="flex items-center gap-2 mb-3">
-              <span className="text-yellow-400"><IconAlert /></span>
+              {alertCount > 0 && <span className="text-yellow-400"><IconAlert /></span>}
               <p className="text-xs font-semibold tracking-widest text-zinc-500 uppercase">Alerts</p>
             </div>
-            <p className="text-4xl font-bold text-yellow-400">{alertCount}</p>
+            <p className={`text-4xl font-bold ${alertCount > 0 ? "text-yellow-400" : "text-white"}`}>{alertCount}</p>
             <p className="text-xs text-zinc-600 mt-3">
               {alertCount > 0 ? `${alertCount} station${alertCount > 1 ? "s" : ""} above ${THRESHOLD} ppm` : "All stations normal"}
             </p>
